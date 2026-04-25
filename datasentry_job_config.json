@@ -1,0 +1,74 @@
+{
+    "name": "DataSentry Pipeline",
+    "description": "End-to-end ELT data quality pipeline for financial data. Orchestrates Bronze ingestion, Silver validation, Gold scoring, and Exception reporting in sequence.",
+    "tasks": [
+        {
+            "task_key": "bronze_ingestion",
+            "description": "Read raw CSV files from Unity Catalog Volume and load into Bronze Delta tables. No transformations — raw data lands exactly as-is.",
+            "notebook_task": {
+                "notebook_path": "/Workspace/Users/kamranhabib1212@gmail.com/datasentry/notebooks/02_bronze_ingestion",
+                "source": "WORKSPACE"
+            },
+            "environment_key": "serverless"
+        },
+        {
+            "task_key": "silver_validation",
+            "description": "Apply 41 DQ rules across Completeness, Validity, Consistency, Uniqueness and Referential Integrity dimensions. Tag each record PASS or FAIL.",
+            "depends_on": [
+                {
+                    "task_key": "bronze_ingestion"
+                }
+            ],
+            "notebook_task": {
+                "notebook_path": "/Workspace/Users/kamranhabib1212@gmail.com/datasentry/notebooks/03_silver_validation",
+                "source": "WORKSPACE"
+            },
+            "environment_key": "serverless"
+        },
+        {
+            "task_key": "gold_scoring",
+            "description": "Compute DQ scorecard at rule, dimension and table level. Assign GREEN/AMBER/RED health status per rule.",
+            "depends_on": [
+                {
+                    "task_key": "silver_validation"
+                }
+            ],
+            "notebook_task": {
+                "notebook_path": "/Workspace/Users/kamranhabib1212@gmail.com/datasentry/notebooks/04_gold_scoring",
+                "source": "WORKSPACE"
+            },
+            "environment_key": "serverless"
+        },
+        {
+            "task_key": "exception_reporting",
+            "description": "Extract all failed records from Silver tables and write unified exception log with severity classification to Gold.",
+            "depends_on": [
+                {
+                    "task_key": "gold_scoring"
+                }
+            ],
+            "notebook_task": {
+                "notebook_path": "/Workspace/Users/kamranhabib1212@gmail.com/datasentry/notebooks/05_exception_reporting",
+                "source": "WORKSPACE"
+            },
+            "environment_key": "serverless"
+        }
+    ],
+    "environments": [
+        {
+            "environment_key": "serverless",
+            "spec": {
+                "client": "1"
+            }
+        }
+    ],
+    "run_as": {
+        "user_name": "kamranhabib1212@gmail.com"
+    },
+    "max_concurrent_runs": 1,
+    "tags": {
+        "project": "datasentry",
+        "layer": "pipeline",
+        "env": "dev"
+    }
+}
