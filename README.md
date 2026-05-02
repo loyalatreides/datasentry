@@ -232,4 +232,4 @@ datasentry/
 
 Kamran Habib
 Data Analyst / Data Engineer
-[LinkedIn](https://www.linkedin.com/in/kamranhabib) | [GitHub](https://github.com/kamranhabib1212)
+[LinkedIn](https://www.linkedin.com/in/kamranhabib10) | [GitHub](https://github.com/loyalatreides)
