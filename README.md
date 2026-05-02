@@ -1,4 +1,4 @@
-# DataSentry — End-to-End ELT Data Quality Pipeline
+# DataSentry - End-to-End ELT Data Quality Pipeline
 
 ![Databricks](https://img.shields.io/badge/Databricks-FF3621?style=flat&logo=databricks&logoColor=white)
 ![Delta Lake](https://img.shields.io/badge/Delta%20Lake-00ADD8?style=flat&logo=delta&logoColor=white)
@@ -86,9 +86,9 @@ Raw CSV Files (Unity Catalog Volume)
 
 ### Key Findings
 
-- `failed_reversed_amount_not_positive` — 18,024 FAILED and REVERSED transactions retain positive amounts, indicating the upstream system does not roll back transaction amounts correctly. This is a systemic business logic issue surfaced by the pipeline.
-- `account_id_exists_in_accounts` — 11,920 transactions reference account IDs that do not exist in the accounts table. Orphaned foreign keys cascading from upstream.
-- `customer_id_exists_in_customers` — 2,720 accounts reference customer IDs that do not exist in the customers table.
+- `failed_reversed_amount_not_positive` - 18,024 FAILED and REVERSED transactions retain positive amounts, indicating the upstream system does not roll back transaction amounts correctly. This is a systemic business logic issue surfaced by the pipeline.
+- `account_id_exists_in_accounts` - 11,920 transactions reference account IDs that do not exist in the accounts table. Orphaned foreign keys cascading from upstream.
+- `customer_id_exists_in_customers` - 2,720 accounts reference customer IDs that do not exist in the customers table.
 
 ---
 
@@ -96,9 +96,9 @@ Raw CSV Files (Unity Catalog Volume)
 
 | Notebook | Purpose |
 |---|---|
-| `00_reset` | Maintenance utility — resets pipeline by dropping Delta tables selectively. Does not affect the Volume or raw CSV files. Run selectively per layer. |
-| `01_data_generation` | Data simulator — generates 307,500 synthetic financial records using Faker with intentional dirt (nulls, duplicates, invalid formats, orphaned FKs). In production this is replaced by real data arriving from an upstream source system. |
-| `02_bronze_ingestion` | Idempotent ingestion with reconciliation — reads CSVs from Volume, checks ingestion log to skip already-processed files, compares source vs ingested row counts, appends to Bronze Delta tables. |
+| `00_reset` | Maintenance utility - resets pipeline by dropping Delta tables selectively. Does not affect the Volume or raw CSV files. Run selectively per layer. |
+| `01_data_generation` | Data simulator - generates 307,500 synthetic financial records using Faker with intentional dirt (nulls, duplicates, invalid formats, orphaned FKs). In production this is replaced by real data arriving from an upstream source system. |
+| `02_bronze_ingestion` | Idempotent ingestion with reconciliation - reads CSVs from Volume, checks ingestion log to skip already-processed files, compares source vs ingested row counts, appends to Bronze Delta tables. |
 | `03_silver_validation` | Applies 41 DQ rules across 5 dimensions. Tags each record PASS or FAIL with a failed_rules column listing exact rule violations. |
 | `04_gold_scoring` | Computes DQ scorecard at rule, dimension, and table level. Assigns GREEN/AMBER/RED health status per rule based on pass rate thresholds. |
 | `05_exception_reporting` | Extracts all failed records from Silver tables and writes a unified exception log with HIGH/MEDIUM/LOW severity classification. |
@@ -109,7 +109,7 @@ Raw CSV Files (Unity Catalog Volume)
 
 ## Idempotent Ingestion
 
-Bronze ingestion is fully idempotent. Every ingested file is recorded in `bronze_ingestion_log` with its file path, row counts, reconciliation status, and timestamp. On each pipeline run, the notebook checks this log and skips files that have already been processed — preventing duplicate data regardless of how many times the pipeline runs.
+Bronze ingestion is fully idempotent. Every ingested file is recorded in `bronze_ingestion_log` with its file path, row counts, reconciliation status, and timestamp. On each pipeline run, the notebook checks this log and skips files that have already been processed - preventing duplicate data regardless of how many times the pipeline runs.
 
 ---
 
@@ -127,7 +127,7 @@ The pipeline is orchestrated via a Databricks Lakeflow Job with 4 tasks running 
 bronze_ingestion → silver_validation → gold_scoring → exception_reporting
 ```
 
-Each task uses `Run if dependencies: All succeeded` — if any task fails, downstream tasks are automatically skipped.
+Each task uses `Run if dependencies: All succeeded` - if any task fails, downstream tasks are automatically skipped.
 
 ### File Arrival Trigger
 
@@ -136,7 +136,7 @@ The pipeline is configured with a File Arrival trigger monitoring the Unity Cata
 /Volumes/workspace/banking_datasentry/datasentry_files/
 ```
 
-When a new CSV file lands in this path, the pipeline fires automatically — no manual intervention required.
+When a new CSV file lands in this path, the pipeline fires automatically - no manual intervention required.
 
 ### Dynamic File Discovery
 
@@ -194,9 +194,9 @@ datasentry/
 
 | Table | Description |
 |---|---|
-| `gold_rule_scores` | Pass rate per rule per table — 41 rows |
+| `gold_rule_scores` | Pass rate per rule per table - 41 rows |
 | `gold_dimension_scores` | Pass rate aggregated by dimension per table |
-| `gold_table_scores` | Overall pass rate per table — 3 rows |
+| `gold_table_scores` | Overall pass rate per table - 3 rows |
 | `gold_exception_log` | Full exception detail with severity classification |
 | `gold_top10_failing_rules` | Pre-aggregated top 10 failing rules for Power BI |
 
@@ -211,7 +211,7 @@ datasentry/
 - Rule health status distribution (donut chart)
 
 **Page 2 - Exception Deep Dive**
-- Total exceptions and severity breakdown KPI cards (46,590 total — 21,427 HIGH, 25,163 MEDIUM)
+- Total exceptions and severity breakdown KPI cards (46,590 total - 21,427 HIGH, 25,163 MEDIUM)
 - Top 10 failing rules (bar chart)
 - Exceptions by table and severity (matrix)
 - Full exception log with rule tags, dimensions, and severity (drillable table)
