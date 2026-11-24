@@ -49,6 +49,7 @@ Raw CSV Files (Unity Catalog Volume)
     [ Remediation ]
     Notebook 06: AUTO_FIX / QUARANTINE / ESCALATE routing
     Writes silver_remediated_* and remediation logs
+    Exports the clean dataset as CSV to datasentry_output
             |
             v
     [ Gold Layer ]
@@ -136,6 +137,19 @@ Design choices:
 
 Most failures are escalated rather than fixed. That is deliberate: the pipeline only changes data where the correct value is certain, and routes everything else to the people who own it.
 
+### Clean Dataset Output
+
+Each run exports a trusted dataset: every Silver record that passed all rules, plus the auto-fixed records. Quarantined and escalated records are left out until they are resolved. Files keep the same columns as the source files and are written to a separate Volume, so the File Arrival trigger never fires on pipeline output.
+
+```
+/Volumes/workspace/banking_datasentry/datasentry_output/clean/<run date>/
+├── customers_clean.csv      61,674 rows
+├── accounts_clean.csv       58,802 rows
+└── transactions_clean.csv  166,799 rows
+```
+
+287,275 trusted records out of 355,700 received, with every excluded record logged in quarantine or escalation.
+
 ---
 
 ## Pipeline Results (Detection View)
@@ -220,7 +234,7 @@ Issues found while reviewing and testing the pipeline, and how they were fixed:
 | `03_silver_validation` | Casts types safely and applies 43 rule checks. Tags each record PASS or FAIL with a `failed_rules` column. |
 | `04_gold_scoring` | Scores full Silver at rule, dimension and table level and assigns GREEN/AMBER/RED health status. |
 | `05_exception_reporting` | Writes a unified exception log of every failed record with HIGH/MEDIUM/LOW severity. |
-| `06_remediation` | Routes failed records to AUTO_FIX, QUARANTINE or ESCALATE, applies safe fixes, re-checks them and writes before/after statistics. |
+| `06_remediation` | Routes failed records to AUTO_FIX, QUARANTINE or ESCALATE, applies safe fixes, re-checks them, writes before/after statistics and exports the clean dataset to the output Volume. |
 
 > Notebook 01 is not part of the Lakeflow Job. It is a development utility for generating synthetic data.
 
@@ -324,7 +338,7 @@ datasentry/
 
 | Table | Description |
 |---|---|
-| `silver_remediated_customers` / `_accounts` / `_transactions` | Passing plus auto-fixed records |
+| `silver_remediated_customers` / `_accounts` / `_transactions` | Auto-fixed records only (deduplicated, country codes standardised) |
 | `gold_remediation_log` | Records that were auto-fixed |
 | `gold_quarantine_log` | Records held for a source system fix |
 | `gold_escalation_log` | Records needing human review, with priority |
