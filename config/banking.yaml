@@ -1,0 +1,232 @@
+# =============================================================================
+# DataSentry dataset config: banking
+# =============================================================================
+# Everything that is specific to the banking dataset lives here.
+# The notebooks contain no table names, column names or rules.
+# To validate a new dataset, write a new file like this one. No code changes.
+#
+# Rule names, dimensions and actions match v1 (Phase 2) exactly, so v2 can be
+# regression-tested against the Phase 2 results.
+# =============================================================================
+
+dataset: banking
+version: 1
+description: Synthetic retail banking data (customers, accounts, transactions)
+owner: kamranhabib1212@gmail.com
+
+# -----------------------------------------------------------------------------
+# Where everything lives. Tables are named <dataset>_<table> inside each schema,
+# for example dq_silver.banking_customers.
+# -----------------------------------------------------------------------------
+environment:
+  catalog: workspace
+  schemas:
+    bronze: dq_bronze
+    silver: dq_silver
+    gold:   dq_gold
+    config: dq_config
+  paths:
+    landing: /Volumes/workspace/dq_bronze/landing/banking
+    exports: /Volumes/workspace/dq_gold/exports/banking
+    config_snapshots: /Volumes/workspace/dq_config/configs/banking
+
+# -----------------------------------------------------------------------------
+# Where the raw data comes from
+# -----------------------------------------------------------------------------
+source:
+  type: files            # files | postgres (second dataset)
+  format: csv
+  options:
+    header: true
+
+# -----------------------------------------------------------------------------
+# How results are scored and routed (same for every table)
+# -----------------------------------------------------------------------------
+scoring:
+  thresholds:
+    green: 99.0          # pass rate >= 99   -> GREEN
+    amber: 95.0          # pass rate >= 95   -> AMBER, below -> RED
+  severity:              # a record's severity comes from the worst dimension it fails
+    Referential Integrity: HIGH
+    Uniqueness:            HIGH
+    Validity:              MEDIUM
+    Consistency:           MEDIUM
+    Completeness:          LOW
+  action_priority: [ESCALATE, QUARANTINE, AUTO_FIX]   # strictest action wins
+  default_action: ESCALATE                            # used if a rule has no action
+
+# -----------------------------------------------------------------------------
+# Shared reference data. "&name" defines a value, "*name" reuses it below.
+# -----------------------------------------------------------------------------
+reference:
+  uuid_pattern: &uuid "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+  currencies:   &currencies [EUR, GBP, USD, CHF, JPY, CAD, AUD]
+  country_map:  &country_map
+    IRELAND: IE
+    IRE: IE
+    IRL: IE
+    GBR: GB
+    BRITAIN: GB
+    UK: GB
+    USA: US
+    GERMANY: DE
+    FRANCE: FR
+    INDIA: IN
+
+# -----------------------------------------------------------------------------
+# Tables, in dependency order: a table that is referenced by a foreign key
+# must come before the table that references it.
+#
+# Check types (implemented once in dq_checks.py):
+#   not_null    column is present
+#   regex       column matches pattern
+#   in_set      column is one of values
+#   castable    raw text converted to its typed column (bad text = fail)
+#   not_future  typed date/timestamp is not after now (strict: today counts as future)
+#   range       typed number compared with gt / gte / lt / lte, optionally only "when" a SQL condition holds
+#   unique      column value appears once in the table
+#   foreign_key column value exists in a PASS record of another table
+#   sql         any SQL boolean expression (escape hatch)
+#
+# allow_null: true  -> an empty value passes this rule (completeness rules catch it)
+# allow_null: false -> an empty value fails this rule too
+# -----------------------------------------------------------------------------
+tables:
+
+  # ===========================================================================
+  - name: customers
+    file_pattern: customers          # matches customers.csv, customers_batch2.csv, ...
+    primary_key: customer_id
+    columns:                          # typed copies created in Silver, raw text kept
+      date_of_birth: {type: date,      as: date_of_birth_dt, formats: ["yyyy-MM-dd"]}
+      created_at:    {type: timestamp, as: created_at_ts,    formats: ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss"]}
+
+    rules:
+      # Completeness
+      - {name: customer_id_not_null, check: not_null, column: customer_id, dimension: Completeness, action: ESCALATE}
+      - {name: full_name_not_null,   check: not_null, column: full_name,   dimension: Completeness, action: ESCALATE}
+      - {name: email_not_null,       check: not_null, column: email,       dimension: Completeness, action: ESCALATE}
+      - {name: created_at_not_null,  check: not_null, column: created_at,  dimension: Completeness, action: ESCALATE}
+      # Validity
+      - {name: email_format_valid,      check: regex,    column: email,         pattern: "^[^@]+@[^@]+\\.[^@]+$", allow_null: false, dimension: Validity, action: ESCALATE}
+      - {name: date_of_birth_valid,     check: castable, column: date_of_birth,                                                    dimension: Validity, action: ESCALATE}
+      - name: country_code_valid
+        check: regex
+        column: country
+        pattern: "^[A-Z]{2}$"
+        allow_null: true
+        dimension: Validity
+        action: AUTO_FIX
+        fix:
+          type: map_values           # replace known variants, e.g. IRELAND -> IE
+          mapping: *country_map
+          case_sensitive: true       # v1 behaviour: "Ireland" is not mapped and gets escalated
+          recheck: true              # re-run this rule after the fix; still failing -> ESCALATE
+      - {name: customer_id_uuid_format, check: regex, column: customer_id, pattern: *uuid, allow_null: false, dimension: Validity, action: ESCALATE}
+      # Consistency
+      - {name: created_at_not_future,    check: not_future, column: created_at,    allow_null: false,               dimension: Consistency, action: ESCALATE}
+      - {name: date_of_birth_not_future, check: not_future, column: date_of_birth, allow_null: true, strict: true,  dimension: Consistency, action: ESCALATE}
+      - name: age_between_18_and_120
+        check: sql
+        expression: "date_of_birth_dt IS NULL OR (datediff(current_date(), date_of_birth_dt) / 365) BETWEEN 18 AND 120"
+        dimension: Consistency
+        action: ESCALATE
+      # Uniqueness
+      - name: customer_id_unique
+        check: unique
+        column: customer_id
+        dimension: Uniqueness
+        action: AUTO_FIX
+        fix: {type: deduplicate, keep: earliest, order_by: ingested_at}
+
+  # ===========================================================================
+  - name: accounts
+    file_pattern: accounts
+    primary_key: account_id
+    columns:
+      balance:     {type: decimal, precision: 18, scale: 2, as: balance_num}
+      opened_date: {type: date, as: opened_date_dt, formats: ["yyyy-MM-dd", ~]}   # ~ = Spark default format
+
+    rules:
+      # Completeness
+      - {name: account_id_not_null,   check: not_null, column: account_id,   dimension: Completeness, action: ESCALATE}
+      - {name: customer_id_not_null,  check: not_null, column: customer_id,  dimension: Completeness, action: ESCALATE}
+      - {name: account_type_not_null, check: not_null, column: account_type, dimension: Completeness, action: ESCALATE}
+      - {name: status_not_null,       check: not_null, column: status,       dimension: Completeness, action: ESCALATE}
+      # Validity
+      - {name: account_type_valid,     check: in_set,   column: account_type, values: [CURRENT, SAVINGS, LOAN],   allow_null: false, dimension: Validity, action: QUARANTINE}
+      - {name: status_valid,           check: in_set,   column: status,       values: [ACTIVE, INACTIVE, CLOSED], allow_null: false, dimension: Validity, action: QUARANTINE}
+      - {name: currency_valid,         check: in_set,   column: currency,     values: *currencies,                allow_null: true,  dimension: Validity, action: QUARANTINE}
+      - {name: account_id_uuid_format, check: regex,    column: account_id,   pattern: *uuid,                     allow_null: false, dimension: Validity, action: ESCALATE}
+      - {name: opened_date_valid,      check: castable, column: opened_date,                                                         dimension: Validity, action: ESCALATE}
+      - {name: balance_valid,          check: castable, column: balance,                                                             dimension: Validity, action: QUARANTINE}
+      # Consistency
+      - name: savings_loan_balance_not_negative
+        check: range
+        column: balance
+        gte: 0
+        when: "account_type <> 'CURRENT'"    # CURRENT accounts may be overdrawn
+        allow_null: true
+        dimension: Consistency
+        action: QUARANTINE
+      - {name: opened_date_not_future, check: not_future, column: opened_date, allow_null: true, dimension: Consistency, action: QUARANTINE}
+      # Uniqueness
+      - name: account_id_unique
+        check: unique
+        column: account_id
+        dimension: Uniqueness
+        action: AUTO_FIX
+        fix: {type: deduplicate, keep: earliest, order_by: ingested_at}
+      # Referential Integrity
+      - {name: customer_id_exists_in_customers, check: foreign_key, column: customer_id, ref_table: customers, ref_column: customer_id, dimension: Referential Integrity, action: ESCALATE}
+
+  # ===========================================================================
+  - name: transactions
+    file_pattern: transactions
+    primary_key: transaction_id
+    columns:
+      amount:           {type: decimal, precision: 18, scale: 2, as: amount_num}
+      transaction_date: {type: timestamp, as: transaction_date_ts, formats: ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss"]}
+
+    rules:
+      # Completeness
+      - {name: transaction_id_not_null,   check: not_null, column: transaction_id,   dimension: Completeness, action: ESCALATE}
+      - {name: account_id_not_null,       check: not_null, column: account_id,       dimension: Completeness, action: ESCALATE}
+      - {name: transaction_type_not_null, check: not_null, column: transaction_type, dimension: Completeness, action: ESCALATE}
+      - {name: amount_not_null,           check: not_null, column: amount,           dimension: Completeness, action: ESCALATE}
+      - {name: currency_not_null,         check: not_null, column: currency,         dimension: Completeness, action: ESCALATE}
+      - {name: transaction_date_not_null, check: not_null, column: transaction_date, dimension: Completeness, action: ESCALATE}
+      - {name: status_not_null,           check: not_null, column: status,           dimension: Completeness, action: ESCALATE}
+      # Validity
+      - {name: transaction_type_valid,     check: in_set, column: transaction_type, values: [DEBIT, CREDIT, TRANSFER],               allow_null: false, dimension: Validity, action: QUARANTINE}
+      - {name: status_valid,               check: in_set, column: status,           values: [COMPLETED, PENDING, FAILED, REVERSED], allow_null: false, dimension: Validity, action: QUARANTINE}
+      - {name: currency_valid,             check: in_set, column: currency,         values: *currencies,                            allow_null: true,  dimension: Validity, action: QUARANTINE}
+      - {name: transaction_id_uuid_format, check: regex,  column: transaction_id,   pattern: *uuid,                                 allow_null: false, dimension: Validity, action: ESCALATE}
+      - name: amount_greater_than_zero
+        check: range
+        column: amount
+        gt: 0
+        when: "status NOT IN ('FAILED', 'REVERSED')"    # rolled-back transactions are checked by the rule below
+        allow_null: true
+        dimension: Validity
+        action: QUARANTINE
+      - {name: amount_valid, check: castable, column: amount, dimension: Validity, action: QUARANTINE}
+      # Consistency
+      - {name: transaction_date_not_future, check: not_future, column: transaction_date, allow_null: true, dimension: Consistency, action: QUARANTINE}
+      - name: failed_reversed_amount_not_positive
+        check: range
+        column: amount
+        lte: 0
+        when: "status IN ('FAILED', 'REVERSED')"
+        allow_null: true
+        dimension: Consistency
+        action: ESCALATE
+      # Uniqueness
+      - name: transaction_id_unique
+        check: unique
+        column: transaction_id
+        dimension: Uniqueness
+        action: AUTO_FIX
+        fix: {type: deduplicate, keep: earliest, order_by: ingested_at}
+      # Referential Integrity
+      - {name: account_id_exists_in_accounts, check: foreign_key, column: account_id, ref_table: accounts, ref_column: account_id, dimension: Referential Integrity, action: ESCALATE}
